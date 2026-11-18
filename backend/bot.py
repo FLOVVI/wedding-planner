@@ -47,7 +47,7 @@ def main():
         logging.info('Команда /id в личном чате покажет значение для WEDDING_OWNER_ID.')
     store = Store(args.db, demo=False, sample=False, owner_id=owner_id)
     try:
-        asyncio.run(TelegramBot(store, token, args.url).run())
+        asyncio.run(TelegramBot(store, token, args.url, manage_events=True).run())
     except KeyboardInterrupt:
         pass
 

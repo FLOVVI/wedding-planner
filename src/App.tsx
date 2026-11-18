@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Armchair, CalendarDays, CalendarClock, HeartHandshake, LayoutGrid, ListTodo, Settings2, Share2, UsersRound, Wallet, X } from 'lucide-react';
+import { Armchair, CalendarDays, CalendarClock, FolderOpen, HeartHandshake, LayoutGrid, ListTodo, Settings2, Share2, UsersRound, Wallet, X } from 'lucide-react';
 import { AccessDialog } from './AccessDialog';
-import { api, ApiError, json, telegram } from './api';
+import { api, ApiError, json, loadTelegram, telegram } from './api';
 import { FormDialog, type Editor } from './components';
+import { EventList } from './EventList';
 import { settingsEditor } from './forms';
 import { OverviewPage } from './OverviewPage';
 import { BudgetPage, GuestsPage, TasksPage } from './PlanningPages';
@@ -22,21 +23,9 @@ const navigation = [
 const SESSION_KEY = 'vmeste-session';
 const initialPage = () => navigation.find(item => `#${item.id}` === location.hash)?.id ?? 'overview';
 
-let telegramScript: Promise<void> | undefined;
-function loadTelegram() {
-  if (telegram()) return Promise.resolve();
-  telegramScript ??= new Promise<void>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-web-app.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Не удалось загрузить Telegram Mini App'));
-    document.head.append(script);
-  });
-  return telegramScript;
-}
-
 export function App() {
   const [config, setConfig] = useState<Config>();
+  const [catalogToken, setCatalogToken] = useState<string>();
   const [session, setSession] = useState<Session>();
   const [plan, setPlan] = useState<Plan>();
   const [teamProgram, setTeamProgram] = useState<Program>();
@@ -46,7 +35,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [failure, setFailure] = useState('');
   const timer = useRef<number>(undefined);
-  const activeToken = useRef('');
+  const activeSession = useRef<Session>(undefined);
   const changing = useRef(false);
 
   const report = useCallback((message: string) => {
@@ -58,12 +47,33 @@ export function App() {
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   function activateSession(next: Session) {
-    sessionStorage.setItem(SESSION_KEY, next.token);
-    activeToken.current = next.token;
+    if (next.token && !next.eventId) sessionStorage.setItem(SESSION_KEY, next.token);
+    activeSession.current = next;
     setFailure('');
     setPlan(undefined);
     setTeamProgram(undefined);
     setSession(next);
+  }
+
+  async function openEvent(token: string, id: string, invite?: string) {
+    const next = await api<Session>(`/events/${id}/open`, token, json('POST', { invite: invite ?? null }));
+    const address = new URL(location.href);
+    if (address.searchParams.get('event') !== id) address.hash = '';
+    address.searchParams.set('event', id);
+    address.searchParams.delete('join');
+    history.replaceState(null, '', address);
+    setPage(initialPage());
+    activateSession({ ...next, eventId: id });
+  }
+
+  function leaveEvent() {
+    const address = new URL(location.href);
+    address.searchParams.delete('event');
+    address.hash = '';
+    history.replaceState(null, '', address);
+    activeSession.current = undefined;
+    setSession(undefined);
+    setPlan(undefined);
   }
 
   useEffect(() => {
@@ -71,6 +81,31 @@ export function App() {
       try {
         const settings = await api<Config>('/config');
         setConfig(settings);
+        if (settings.events) {
+          const shared = /^#view=([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{32})$/.exec(location.hash);
+          if (shared) {
+            if (settings.offline) throw new Error('Для просмотра по ссылке нужен подключённый сервер.');
+            activateSession({ role: 'team', eventId: shared[1], token: shared[2], publicView: true });
+            return;
+          }
+          let token = '';
+          if (!settings.offline) {
+            await loadTelegram();
+            const app = telegram();
+            app?.ready();
+            app?.expand();
+            if (!app?.initData) throw new Error('Откройте приложение из Telegram, чтобы войти в «Мои мероприятия».');
+            token = (await api<{ token: string }>('/events/login', undefined, json('POST', { initData: app.initData }))).token;
+          }
+          setCatalogToken(token);
+          const params = new URLSearchParams(location.search);
+          const join = /^([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{32})$/.exec(params.get('join') ?? '');
+          const selected = params.get('event');
+          if (join && settings.offline) throw new Error('Для приглашений редакторов нужен подключённый сервер.');
+          if (join) await openEvent(token, join[1], join[2]);
+          else if (selected && /^[A-Za-z0-9_-]{22,36}$/.test(selected)) await openEvent(token, selected);
+          return;
+        }
         if (settings.demo) {
           const params = new URLSearchParams(location.search);
           const invite = params.get('invite');
@@ -119,13 +154,14 @@ export function App() {
 
   const refresh = useCallback(async (current: Session) => {
     if (current.role === 'team') {
-      const next = await api<Program>('/program', current.token);
-      if (activeToken.current === current.token) setTeamProgram(previous => previous && previous.revision > next.revision ? previous : next);
+      const path = current.publicView ? `/events/${current.eventId}/program` : '/program';
+      const next = await api<Program>(path, current.token);
+      if (activeSession.current === current) setTeamProgram(previous => previous && previous.revision > next.revision ? previous : next);
     } else {
-      const next = await api<Plan>('/plan', current.token);
-      if (activeToken.current === current.token) setPlan(previous => previous && previous.revision > next.revision ? previous : next);
+      const next = await api<Plan>('/plan', current.token, undefined, current.eventId);
+      if (activeSession.current === current) setPlan(previous => previous && previous.revision > next.revision ? previous : next);
     }
-    if (activeToken.current === current.token) setFailure('');
+    if (activeSession.current === current) setFailure('');
   }, []);
 
   useEffect(() => {
@@ -133,11 +169,14 @@ export function App() {
     function sync() {
       if (!session) return;
       void refresh(session).catch(reason => {
-        if (activeToken.current !== session.token) return;
-        if (reason instanceof ApiError && reason.status === 401) {
+        if (activeSession.current !== session) return;
+        if (reason instanceof ApiError && (reason.status === 401 || session.publicView && reason.status === 403)) {
+          if (session.eventId && !session.publicView) leaveEvent();
           setFailure(reason.message);
           setPlan(undefined);
           setTeamProgram(undefined);
+        } else if (config?.offline && reason instanceof Error) {
+          setFailure(reason.message);
         } else setFailure('Не удалось обновить данные. Приложение повторит попытку.');
       });
     }
@@ -149,7 +188,7 @@ export function App() {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [session, refresh]);
+  }, [session, refresh, config?.offline]);
 
   async function reopenDemo() {
     try {
@@ -170,7 +209,7 @@ export function App() {
     if (changing.current) throw new Error('Подождите, пока сохранится предыдущее изменение');
     changing.current = true;
     try {
-      await api(path, session.token, init);
+      await api(path, session.token, init, session.eventId);
       await refresh(session).catch(() => report('Изменение сохранено. План обновится при следующем соединении.'));
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) await refresh(session).catch(() => undefined);
@@ -205,11 +244,18 @@ export function App() {
 
   const workspace = session?.role === 'team' ? teamProgram : plan;
   const team = session?.role === 'team';
+  const canShare = !team && !config?.offline && (!session?.eventId || session.role === 'owner');
+  const toast = notice && <div className="toast" role="status"><span>{notice}</span><button className="icon-btn" aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>;
+  if (!session && config?.events && catalogToken !== undefined) return <>
+    {failure && <div className="warning" role="status">{failure}</div>}
+    <EventList token={catalogToken} offline={Boolean(config.offline)} select={id => openEvent(catalogToken, id)} report={report} />
+    {toast}
+  </>;
   if (!workspace || !config || !session) return <main className="entry">
     <div className="brand-mark"><HeartHandshake size={25} /></div><h1>Вместе</h1>
     <p role="status">{failure || 'Открываем свадебный план…'}</p>
     {config?.demo && failure && <button className="btn secondary" onClick={() => void reopenDemo()}>Открыть локальный план</button>}
-    {!config && failure && <button className="btn secondary" onClick={() => location.reload()}>Повторить</button>}
+    {(!config || config.offline) && failure && <button className="btn secondary" onClick={() => location.reload()}>Повторить</button>}
     {config && !config.demo && failure && config.botUsername && <a className="btn primary" href={`https://t.me/${config.botUsername}`}>Открыть бота</a>}
   </main>;
 
@@ -230,16 +276,20 @@ export function App() {
         <div className="workspace-label"><span><CalendarDays size={18} /></span><strong>{workspace.settings.name}</strong></div>
         <div className="top-actions">
           {config.demo && <span className="local-label"><i /> Локально</span>}
-          {team ? <span className="read-only">Только просмотр</span> : <button className="btn secondary" onClick={() => setSharing(true)}><Share2 size={16} /> Доступ</button>}
+          {config.offline && <span className="local-label" title="План сохраняется в этом браузере"><i /> На устройстве</span>}
+          {team && <span className="read-only">Только просмотр</span>}
+          {!team && session.eventId && <button className="btn secondary" onClick={leaveEvent}><FolderOpen size={16} /> Мероприятия</button>}
+          {canShare && <button className="btn secondary" onClick={() => setSharing(true)}><Share2 size={16} /> Доступ</button>}
         </div>
       </div>
       <main className="content" id="content">
         {failure && <div className="warning" role="status">{failure}</div>}
-        {team && teamProgram && <ProgramPage data={teamProgram} open={open} share={() => undefined} />}
+        {team && teamProgram && <ProgramPage data={teamProgram} open={open} />}
         {!team && plan && <>
           {page === 'overview' && <OverviewPage plan={plan} go={go} settings={() => open(settingsEditor(plan.settings))} />}
-          {page === 'program' && <ProgramPage data={{ revision: plan.revision, settings: plan.settings, blocks: plan.program }} plan={plan} open={open} share={() => setSharing(true)} />}
-          {page === 'seating' && <SeatingPage plan={plan} token={session.token} open={open} change={change}
+          {page === 'program' && <ProgramPage data={{ revision: plan.revision, settings: plan.settings, blocks: plan.program }} plan={plan} open={open}
+            share={canShare ? () => setSharing(true) : undefined} />}
+          {page === 'seating' && <SeatingPage plan={plan} token={session.token} eventId={session.eventId} open={open} change={change}
             upload={changeFloor} clearImage={() => changeFloor()} report={report} />}
           {page === 'guests' && <GuestsPage plan={plan} open={open} change={change} />}
           {page === 'budget' && <BudgetPage plan={plan} open={open} change={change} />}
@@ -254,6 +304,6 @@ export function App() {
       return mutation(`/items/${form.collection}${item}?revision=${revision}`, json(form.id ? 'PUT' : 'POST', data));
     }} remove={editor.form.id ? () => mutation(`/items/${editor.form.collection}/${editor.form.id}?revision=${editor.revision}`, { method: 'DELETE' }) : undefined} />}
     {sharing && <AccessDialog session={session} config={config} close={() => setSharing(false)} />}
-    {notice && <div className="toast" role="status"><span>{notice}</span><button className="icon-btn" aria-label="Закрыть уведомление" onClick={() => setNotice('')}><X size={16} /></button></div>}
+    {toast}
   </div>;
 }

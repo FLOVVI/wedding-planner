@@ -100,6 +100,7 @@ export function BudgetPage({ plan, open, change }: { plan: Plan; open: OpenEdito
 export function TasksPage({ plan, open, change, token, config, report }: {
   plan: Plan; open: OpenEditor; change: ChangeRecord; token: string; config: Config; report: (text: string) => void;
 }) {
+  const hasReminders = !config.offline && !config.events;
   const [reminders, setReminders] = useState<Reminders>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -114,12 +115,13 @@ export function TasksPage({ plan, open, change, token, config, report }: {
   const clockValue = clock ?? testDate.toISOString().slice(0, 16);
 
   useEffect(() => {
+    if (!hasReminders) return;
     let mounted = true;
     void api<Reminders>('/reminders', token).then(value => {
       if (mounted) setReminders(value);
     }).catch(reason => { if (mounted) report(reason.message); });
     return () => { mounted = false; };
-  }, [token, report]);
+  }, [token, report, hasReminders]);
 
   async function reminderAction(action: () => Promise<unknown>) {
     setBusy(true);
@@ -140,7 +142,7 @@ export function TasksPage({ plan, open, change, token, config, report }: {
     <header className="page-heading"><div><h1>Задачи</h1><p>Сроки подготовки и личные напоминания.</p></div>
       <AddButton onClick={() => open(taskEditor())}>Добавить задачу</AddButton>
     </header>
-    <div className="two-panels tasks-grid">
+    <div className={hasReminders ? 'two-panels tasks-grid' : 'tasks-grid'}>
       <section className="panel">
         <div className="panel-heading"><div><h2>Список дел</h2><p>{tasks.filter(task => !task.done).length} осталось</p></div><ListTodo size={20} /></div>
         {!tasks.length && <Empty>Добавьте задачу со сроком.</Empty>}
@@ -153,7 +155,7 @@ export function TasksPage({ plan, open, change, token, config, report }: {
           <EditButton label={`Изменить ${task.name}`} onClick={() => open(taskEditor(task))} />
         </div>)}
       </section>
-      <section className="panel reminders-panel">
+      {hasReminders && <section className="panel reminders-panel">
         <div className="panel-heading"><div><h2>Напоминания</h2><p>В 10:00 за день до срока · {plan.settings.timezone}</p></div><Bell size={20} /></div>
         {reminders && <div className="reminders-main">
           {reminders.connected ? <label className="check-field"><input type="checkbox" checked={reminders.enabled} disabled={busy}
@@ -180,7 +182,7 @@ export function TasksPage({ plan, open, change, token, config, report }: {
               <small>{reminderStatuses[item.status] ?? 'Доставка не подтверждена'}</small></li>)}
           </ul>}
         </div>}
-      </section>
+      </section>}
     </div>
   </>;
 }

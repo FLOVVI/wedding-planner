@@ -60,8 +60,8 @@ def log_in(connection, user_id: str, invite: str | None):
         link = live_link(connection, invite_digest, now)
         if not link:
             raise HTTPException(403, 'Ссылка истекла или была отозвана')
-        if link['kind'] == 'partner':
-            if connection.execute("SELECT 1 FROM members WHERE role = 'editor'").fetchone():
+        if link['kind'] in ('partner', 'editor'):
+            if link['kind'] == 'partner' and connection.execute("SELECT 1 FROM members WHERE role = 'editor'").fetchone():
                 raise HTTPException(409, 'Второй участник уже присоединился')
             role = 'editor'
             connection.execute('INSERT INTO members VALUES (?, ?)', (user_id, role))
@@ -101,7 +101,16 @@ def issue_link(connection, kind):
     if kind == 'partner' and connection.execute("SELECT 1 FROM members WHERE role = 'editor'").fetchone():
         raise HTTPException(409, 'Второй участник уже присоединился')
     token = secrets.token_urlsafe(24)
-    connection.execute('UPDATE links SET revoked = 1 WHERE kind = ?', (kind,))
+    if kind != 'editor':
+        connection.execute('UPDATE links SET revoked = 1 WHERE kind = ?', (kind,))
     connection.execute('INSERT INTO links (digest, kind, expires) VALUES (?, ?, ?)',
-                       (digest(token), kind, now + 86400 if kind == 'partner' else None))
+                       (digest(token), kind, now + 86400 if kind in ('partner', 'editor') else None))
     return token
+
+
+def revoke_editor(connection, user_id):
+    result = connection.execute("DELETE FROM members WHERE user_id = ? AND role = 'editor'", (user_id,))
+    if not result.rowcount:
+        raise HTTPException(404, 'Редактор не найден')
+    connection.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+    connection.execute('DELETE FROM subscriptions WHERE user_id = ?', (user_id,))

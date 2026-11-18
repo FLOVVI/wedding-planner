@@ -18,7 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
-from .auth import authenticate, issue_link, log_in, verify_telegram
+from .auth import authenticate, issue_link, log_in, revoke_editor, verify_telegram
+from .events import EventDirectory
 from .models import COLLECTIONS, DemoLogin, Settings, Simulation, Subscription, TelegramLogin
 from .notifications import TelegramBot, collect, subscribe
 from .planner import apply_record, calculate_budget, lookup, program_view, remove_record
@@ -26,7 +27,7 @@ from .store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_IMAGE = 6 * 1024 * 1024
-LinkKind = Literal['partner', 'team']
+LinkKind = Literal['partner', 'team', 'editor']
 
 
 def validation_message(errors):
@@ -68,12 +69,12 @@ def validate_image(raw):
         raise HTTPException(422, 'Выберите исправный файл PNG или JPEG') from None
 
 
-def create_app(*, demo=False, sample=True, database=None):
+def create_app(*, demo=False, sample=True, database=None, events=False, api_only=False, event_store=None):
     bot_token = '' if demo else os.environ.get('TELEGRAM_BOT_TOKEN', '')
     bot_username = os.environ.get('TELEGRAM_BOT_USERNAME', '').lstrip('@')
     mini_app_url = os.environ.get('TELEGRAM_MINI_APP_URL', '')
-    store = Store(Path(database or ROOT / 'data' / ('demo.sqlite3' if demo else 'wedding.sqlite3')), demo, demo and sample)
-    bot = TelegramBot(store, bot_token, mini_app_url) if bot_token and mini_app_url else None
+    store = event_store or Store(Path(database or ROOT / 'data' / ('demo.sqlite3' if demo else 'wedding.sqlite3')), demo, demo and sample)
+    bot = TelegramBot(store, bot_token, mini_app_url, manage_events=events) if bot_token and mini_app_url and not api_only else None
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -86,6 +87,10 @@ def create_app(*, demo=False, sample=True, database=None):
             await asyncio.gather(*jobs, return_exceptions=True)
 
     app = FastAPI(title='Вместе', lifespan=lifespan)
+    if events and bot_token:
+        catalog = EventDirectory(store, lambda child: create_app(event_store=child, api_only=True))
+        app.include_router(catalog.router(bot_token))
+        app.mount('/events/{event_id}', catalog)
 
     if not demo and mini_app_url:
         frontend = urlsplit(mini_app_url)
@@ -106,7 +111,7 @@ def create_app(*, demo=False, sample=True, database=None):
             if not loopback and (peer, host) != ('testclient', 'testserver'):
                 return JSONResponse({'detail': 'Локальный режим доступен с этого устройства'}, status_code=403)
         response = await call_next(request)
-        if request.url.path.startswith('/api/'):
+        if request.url.path.startswith(('/api/', '/events/')):
             response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'no-referrer'
@@ -122,7 +127,7 @@ def create_app(*, demo=False, sample=True, database=None):
 
     @app.get('/api/config')
     def config():
-        return {'demo': demo, 'botUsername': bot_username}
+        return {'demo': demo, 'botUsername': bot_username, 'events': events and bool(bot_token)}
 
     @app.post('/api/session/demo')
     def demo_login(body: DemoLogin):
@@ -243,24 +248,35 @@ def create_app(*, demo=False, sample=True, database=None):
     @app.get('/api/links')
     def links(request: Request):
         with store.connect() as connection:
-            require_role(connection, request, 'owner', 'editor')
+            identity = require_role(connection, request, 'owner', 'editor')
             team = connection.execute("SELECT 1 FROM links WHERE kind = 'team' AND revoked = 0").fetchone()
-            partner = connection.execute("SELECT 1 FROM members WHERE role = 'editor'").fetchone()
-            return {'teamActive': bool(team), 'partnerJoined': bool(partner)}
+            editors = [row['user_id'] for row in connection.execute("SELECT user_id FROM members WHERE role = 'editor'")]
+            pending = connection.execute(
+                "SELECT 1 FROM links WHERE kind = 'editor' AND revoked = 0 AND expires > unixepoch()"
+            ).fetchone()
+            return {'teamActive': bool(team), 'partnerJoined': bool(editors),
+                    'editors': editors if identity.role == 'owner' else [], 'editorPending': bool(pending)}
 
     @app.post('/api/links/{kind}')
     def create_link(kind: LinkKind, request: Request):
         with store.connect(write=True) as connection:
-            roles = ('owner',) if kind == 'partner' else ('owner', 'editor')
+            roles = ('owner',) if event_store or kind in ('partner', 'editor') else ('owner', 'editor')
             require_role(connection, request, *roles)
             return {'token': issue_link(connection, kind)}
 
     @app.delete('/api/links/{kind}')
     def revoke_link(kind: LinkKind, request: Request):
         with store.connect(write=True) as connection:
-            roles = ('owner',) if kind == 'partner' else ('owner', 'editor')
+            roles = ('owner',) if event_store or kind in ('partner', 'editor') else ('owner', 'editor')
             require_role(connection, request, *roles)
             connection.execute('UPDATE links SET revoked = 1 WHERE kind = ?', (kind,))
+            return {'revoked': True}
+
+    @app.delete('/api/editors/{user_id}')
+    def remove_editor(user_id: str, request: Request):
+        with store.connect(write=True) as connection:
+            require_role(connection, request, 'owner')
+            revoke_editor(connection, user_id)
             return {'revoked': True}
 
     @app.get('/api/reminders')

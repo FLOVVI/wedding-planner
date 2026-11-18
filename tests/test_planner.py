@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import io
@@ -5,6 +6,7 @@ import json
 import os
 import time
 import unittest
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +19,7 @@ from PIL import Image
 from telebot import types
 
 from backend.main import create_app
+from backend.event_bot import EventBot
 from backend.notifications import TelegramBot, claim_delivery, collect
 from backend.store import Store
 
@@ -226,6 +229,106 @@ class PlannerTests(unittest.TestCase):
             bot.handle_message(connection, message(13579, '/reminders'))
             subscribers = connection.execute('SELECT user_id FROM subscriptions WHERE enabled = 1').fetchall()
             self.assertEqual([row['user_id'] for row in subscribers], ['13579'])
+
+            event_id, invitation = 'a' * 22, 'b' * 32
+            reply = bot.handle_message(connection, message(24680, f'/start edit_{event_id}_{invitation}'))
+            button = reply['reply_markup'].to_dict()['inline_keyboard'][0][0]
+            self.assertEqual(button['web_app']['url'], f'{url}?join={event_id}.{invitation}')
+
+    def test_bot_forms_and_editor_links_use_the_same_durable_event(self):
+        path = self.database.with_name('bot-forms.db')
+        url = 'https://example.github.io/wedding/'
+        bot = EventBot(Store(path, demo=False, sample=False), url)
+        bot.username = 'example_bot'
+
+        def message(user_id, message_id, *, text=None, form=None):
+            data = {'message_id': message_id, 'date': int(time.time()),
+                    'chat': {'id': user_id, 'type': 'private'},
+                    'from': {'id': user_id, 'is_bot': False, 'first_name': 'Example'}}
+            if form:
+                data['web_app_data'] = {'button_text': 'Сохранить', 'data': json.dumps(form)}
+            else:
+                data['text'] = text
+            return types.Message.de_json(data)
+
+        creation = message(111, 1, form={'type': 'create_event', 'settings': {'name': 'Свадьба пары'}})
+        self.assertIn('Свадьба пары', bot.message(creation)['text'])
+        bot.message(creation)
+        event, = bot.events.list('111')
+        event_id = event['id']
+        first = bot.invite('111', event_id, 'editor')['text'].split('?start=')[-1]
+        second = bot.invite('111', event_id, 'editor')['text'].split('?start=')[-1]
+        for user, invite in [(222, first), (333, second)]:
+            self.assertIn('Свадьба пары', bot.message(message(user, 2, text='/start ' + invite))['text'])
+            self.assertEqual(bot.events.list(str(user))[0]['role'], 'editor')
+        update = {'type': 'add_record', 'eventId': event_id, 'collection': 'block',
+                  'record': {'title': 'Церемония из формы', 'start': '17:00', 'duration': 30}}
+        self.assertIn('нет доступа', bot.message(message(444, 3, form=update))['text'])
+        self.assertIn('Церемония из формы', bot.message(message(333, 3, form=update))['text'])
+        viewer = bot.invite('111', event_id, 'team')['text'].split('?start=')[-1]
+
+        reopened = EventBot(Store(path, demo=False, sample=False), url)
+        guest_view = reopened.message(message(444, 4, text='/start ' + viewer))
+        self.assertIn('Церемония из формы', guest_view['text'])
+        button = guest_view['reply_markup'].to_dict()['inline_keyboard'][0][0]['web_app']['url']
+        payload = button.split('#program=')[-1]
+        program = json.loads(zlib.decompress(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4))))
+        self.assertEqual(program['blocks'][0]['title'], 'Церемония из формы')
+        self.assertNotIn('banquetPrice', program['settings'])
+        self.assertEqual(reopened.events.list('444'), [])
+
+    def test_event_catalog_isolates_owners_and_accepts_multiple_editors(self):
+        token = 'test-only-token'
+        with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': token, 'TELEGRAM_MINI_APP_URL': 'https://example.github.io/wedding/'}):
+            app = create_app(events=True, api_only=True, database=self.database.with_name('catalog.db'))
+            with TestClient(app) as client:
+                def sign_in(telegram_id):
+                    fields = {'user': json.dumps({'id': telegram_id}), 'auth_date': str(int(time.time()))}
+                    check = '\n'.join(f'{key}={value}' for key, value in sorted(fields.items()))
+                    secret = hmac.digest(b'WebAppData', token.encode(), 'sha256')
+                    fields['hash'] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+                    result = client.post('/api/events/login', json={'initData': urlencode(fields)})
+                    return {'Authorization': 'Bearer ' + result.raise_for_status().json()['token']}
+
+                owner, editor_one, editor_two, outsider = [sign_in(user_id) for user_id in (100, 300, 400, 500)]
+                event_id = client.post('/api/events', headers=owner, json={'name': 'План пары'}).raise_for_status().json()['id']
+                other_id = client.post('/api/events', headers=outsider, json={'name': 'Другой план'}).raise_for_status().json()['id']
+                self.assertEqual([item['id'] for item in client.get('/api/events', headers=owner).json()], [event_id])
+                self.assertEqual(client.post(f'/api/events/{other_id}/open', headers=owner, json={}).status_code, 403)
+                self.assertEqual(client.post(f'/api/events/{event_id}/open', headers=outsider, json={}).status_code, 403)
+
+                def open_event(headers, invite=None):
+                    result = client.post(f'/api/events/{event_id}/open', headers=headers, json={'invite': invite})
+                    return {'Authorization': 'Bearer ' + result.raise_for_status().json()['token']}
+
+                owner_plan = open_event(owner)
+                prefix = f'/events/{event_id}/api'
+                first_link = client.post(prefix + '/links/editor', headers=owner_plan).raise_for_status().json()['token']
+                second_link = client.post(prefix + '/links/editor', headers=owner_plan).raise_for_status().json()['token']
+                reader = client.post(prefix + '/links/team', headers=owner_plan).raise_for_status().json()['token']
+                editor_one_plan = open_event(editor_one, first_link)
+                editor_two_plan = open_event(editor_two, second_link)
+                self.assertEqual(client.post(f'/api/events/{event_id}/open', headers=outsider, json={'invite': first_link}).status_code, 403)
+                self.assertEqual(client.post(f'/api/events/{event_id}/open', headers=outsider, json={'invite': reader}).status_code, 403)
+                self.assertEqual(client.post(prefix + '/links/editor', headers=editor_two_plan).status_code, 403)
+                self.assertEqual(client.get(f'/events/{other_id}/api/plan', headers=owner_plan).status_code, 401)
+                self.assertEqual(client.get('/api/events', headers=editor_two).json()[0]['role'], 'editor')
+
+                revision = client.get(prefix + '/plan', headers=editor_one_plan).raise_for_status().json()['revision']
+                client.post(prefix + f'/items/blocks?revision={revision}', headers=editor_two_plan,
+                            json={'title': 'Церемония', 'start': '18:00', 'duration': 40}).raise_for_status()
+                program_path = f'/api/events/{event_id}/program'
+                reader_headers = {'Authorization': 'Bearer ' + reader}
+                view = client.get(program_path, headers=reader_headers).raise_for_status().json()
+                self.assertEqual(view['blocks'][0]['title'], 'Церемония')
+                self.assertNotIn('banquetPrice', view['settings'])
+                self.assertEqual(client.get(prefix + '/plan', headers=reader_headers).status_code, 401)
+                client.delete(prefix + '/editors/300', headers=owner_plan).raise_for_status()
+                self.assertEqual(client.get(prefix + '/plan', headers=editor_one_plan).status_code, 401)
+                self.assertEqual(client.get(prefix + '/plan', headers=editor_two_plan).status_code, 200)
+                self.assertEqual(client.get('/api/events', headers=editor_one).json(), [])
+                client.delete(prefix + '/links/team', headers=owner_plan).raise_for_status()
+                self.assertEqual(client.get(program_path, headers=reader_headers).status_code, 403)
 
 
 if __name__ == '__main__':

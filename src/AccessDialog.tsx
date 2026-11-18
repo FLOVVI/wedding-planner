@@ -4,8 +4,8 @@ import { api } from './api';
 import { Modal } from './components';
 import type { Config, Session } from './types';
 
-type LinkKind = 'team' | 'partner';
-type Links = { teamActive: boolean; partnerJoined: boolean };
+type LinkKind = 'team' | 'partner' | 'editor';
+type Links = { teamActive: boolean; partnerJoined: boolean; editors: string[]; editorPending: boolean };
 
 export function AccessDialog({ session, config, close }: { session: Session; config: Config; close: () => void }) {
   const [links, setLinks] = useState<Links>();
@@ -16,22 +16,33 @@ export function AccessDialog({ session, config, close }: { session: Session; con
 
   useEffect(() => {
     let active = true;
-    void api<Links>('/links', session.token).then(result => { if (active) setLinks(result); })
+    void api<Links>('/links', session.token, undefined, session.eventId).then(result => { if (active) setLinks(result); })
       .catch(reason => { if (active) setError(reason.message); });
     return () => { active = false; };
-  }, [session.token]);
+  }, [session.token, session.eventId]);
 
   async function change(kind: LinkKind, method: 'POST' | 'DELETE') {
     setError('');
     setCopied(undefined);
     setBusy(true);
     try {
-      const result = await api<{ token?: string }>(`/links/${kind}`, session.token, { method });
-      const url = result.token ? inviteUrl(result.token, kind, config) : undefined;
+      const result = await api<{ token?: string }>(`/links/${kind}`, session.token, { method }, session.eventId);
+      const url = result.token ? inviteUrl(result.token, kind, config, session.eventId) : undefined;
       setIssued(previous => ({ ...previous, [kind]: url }));
-      setLinks(await api('/links', session.token));
+      setLinks(await api('/links', session.token, undefined, session.eventId));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось обновить ссылку');
+    } finally { setBusy(false); }
+  }
+
+  async function removeEditor(id: string) {
+    setError('');
+    setBusy(true);
+    try {
+      await api('/editors/' + encodeURIComponent(id), session.token, { method: 'DELETE' }, session.eventId);
+      setLinks(await api('/links', session.token, undefined, session.eventId));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось убрать редактора');
     } finally { setBusy(false); }
   }
 
@@ -48,7 +59,7 @@ export function AccessDialog({ session, config, close }: { session: Session; con
     const url = issued[kind];
     if (!url) return null;
     return <div className="link-field">
-      <input aria-label={kind === 'team' ? 'Ссылка для команды' : 'Ссылка для пары'} value={url} readOnly onFocus={event => event.target.select()} />
+      <input aria-label={kind === 'team' ? 'Ссылка для команды' : kind === 'editor' ? 'Ссылка для редактора' : 'Ссылка для пары'} value={url} readOnly onFocus={event => event.target.select()} />
       <button className="icon-btn" aria-label={copied === kind ? 'Скопировано' : 'Скопировать ссылку'} onClick={() => void copy(kind, url)}>
         {copied === kind ? <Check size={18} /> : <Copy size={18} />}
       </button>
@@ -70,7 +81,19 @@ export function AccessDialog({ session, config, close }: { session: Session; con
         {links?.teamActive && <small>Новая ссылка заменяет предыдущую.</small>}
       </div>
     </div>
-    {session.role === 'owner' && <div className="access-section"><UserRoundPlus size={21} />
+    {session.role === 'owner' && session.eventId && <div className="access-section"><UserRoundPlus size={21} />
+      <div><h3>Редакторы</h3><p>Редактор меняет общий план. Каждое приглашение действует 24 часа и используется один раз.</p>
+        {links?.editors.map(id => <div className="editor-access-row" key={id}>
+          <span>Telegram ID {id}</span><button className="btn danger" disabled={busy} onClick={() => void removeEditor(id)}>Убрать</button>
+        </div>)}
+        {linkField('editor')}
+        <div className="access-actions">
+          <button className="btn secondary" disabled={busy || !links} onClick={() => void change('editor', 'POST')}>Добавить редактора</button>
+          {links?.editorPending && <button className="btn danger" disabled={busy} onClick={() => void change('editor', 'DELETE')}>Отозвать приглашения</button>}
+        </div>
+      </div>
+    </div>}
+    {session.role === 'owner' && !session.eventId && <div className="access-section"><UserRoundPlus size={21} />
       <div><h3>Второй участник</h3><p>{links?.partnerJoined ? 'Второй участник уже редактирует общий план.' : 'Приглашение действует 24 часа и используется один раз.'}</p>
         {linkField('partner')}
         {!links?.partnerJoined && <div className="access-actions">
@@ -84,7 +107,14 @@ export function AccessDialog({ session, config, close }: { session: Session; con
   </Modal>;
 }
 
-function inviteUrl(token: string, kind: LinkKind, config: Config) {
+function inviteUrl(token: string, kind: LinkKind, config: Config, eventId?: string) {
+  if (eventId && kind === 'team') {
+    const address = new URL(location.href);
+    address.search = '';
+    address.hash = `view=${eventId}.${token}`;
+    return address.toString();
+  }
+  if (eventId && kind === 'editor') return `https://t.me/${config.botUsername}?start=edit_${eventId}_${token}`;
   if (!config.demo) return `https://t.me/${config.botUsername}?startapp=${token}`;
   const url = new URL('/', location.origin);
   url.searchParams.set('as', kind);

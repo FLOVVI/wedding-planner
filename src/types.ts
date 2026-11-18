@@ -115,11 +115,22 @@ export interface Program {
 export interface Config {
   demo: boolean;
   botUsername: string;
+  offline?: boolean;
+  events?: boolean;
 }
 
 export interface Session {
   role: Role;
   token: string;
+  eventId?: string;
+  publicView?: boolean;
+}
+
+export interface EventSummary {
+  id: string;
+  name: string;
+  date: string | null;
+  role: Exclude<Role, 'team'>;
 }
 
 export interface Reminders {

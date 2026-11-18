@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import re
 from datetime import date, datetime, time, timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from aiohttp import ClientError
@@ -8,6 +10,7 @@ from telebot import types
 from telebot.async_telebot import AsyncTeleBot
 from telebot.asyncio_helper import ApiException
 
+from .event_bot import EventBot
 from .planner import lookup
 from .store import Store
 
@@ -87,10 +90,11 @@ def subscribe(connection, user_id, chat_id, enabled):
 
 
 class TelegramBot:
-    def __init__(self, store: Store, token: str, mini_app_url: str):
+    def __init__(self, store: Store, token: str, mini_app_url: str, manage_events=False):
         self.store = store
         self.client = AsyncTeleBot(token)
         self.mini_app_url = mini_app_url
+        self.events = EventBot(store, mini_app_url) if manage_events else None
 
     async def send(self, **reply):
         try:
@@ -102,6 +106,12 @@ class TelegramBot:
 
     async def run(self):
         try:
+            if self.events:
+                try:
+                    identity = await asyncio.wait_for(self.client.get_me(), timeout=12)
+                    self.events.username = identity.username
+                except (ApiException, ClientError, TimeoutError):
+                    raise RuntimeError('Не удалось подключить свадебного бота к Telegram') from None
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self.poll())
                 tasks.create_task(self.reminder_loop())
@@ -128,14 +138,25 @@ class TelegramBot:
         while True:
             try:
                 updates = await self.client.get_updates(offset=offset, timeout=20, request_timeout=30,
-                                                        allowed_updates=['message'])
+                                                        allowed_updates=['message', 'callback_query'] if self.events else ['message'])
             except (ApiException, ClientError, TimeoutError):
                 logger.warning('Telegram polling did not succeed, retrying')
                 await asyncio.sleep(5)
                 continue
             for update in updates:
+                reply = None
+                if self.events:
+                    if update.callback_query:
+                        reply = self.events.callback(update.callback_query)
+                        try:
+                            await self.client.answer_callback_query(update.callback_query.id)
+                        except (ApiException, ClientError, TimeoutError):
+                            logger.warning('Telegram did not confirm the button press')
+                    elif update.message:
+                        reply = self.events.message(update.message)
                 with self.store.connect(write=True) as connection:
-                    reply = self.handle_message(connection, update.message)
+                    if reply is None:
+                        reply = self.handle_message(connection, update.message)
                     offset = update.update_id + 1
                     connection.execute("INSERT OR REPLACE INTO bot_state VALUES ('offset', ?)", (offset,))
                 if reply:
@@ -161,8 +182,16 @@ class TelegramBot:
             return {'chat_id': chat_id, 'text': 'Напоминания о задачах и платежах включены.'}
         if command == '/start' and member:
             connection.execute('INSERT OR IGNORE INTO subscriptions VALUES (?, ?, 0)', (user_id, chat_id))
+        url = self.mini_app_url
+        if command == '/start' and len(words) == 2:
+            invitation = re.fullmatch(r'edit_([A-Za-z0-9_-]{22})_([A-Za-z0-9_-]{32})', words[1])
+            if invitation:
+                address = urlsplit(url)
+                query = dict(parse_qsl(address.query))
+                query['join'] = '.'.join(invitation.groups())
+                url = urlunsplit(address._replace(query=urlencode(query)))
         keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton('Открыть «Вместе»', web_app=types.WebAppInfo(self.mini_app_url)))
+        keyboard.add(types.InlineKeyboardButton('Открыть «Вместе»', web_app=types.WebAppInfo(url)))
         return {
             'chat_id': chat_id,
             'text': 'Откройте «Вместе». Чтобы включить напоминания, отправьте /reminders.' if member

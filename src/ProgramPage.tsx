@@ -12,8 +12,8 @@ const eventIcons = {
 };
 const contractorIcons = { music: Music2, venue: MapPin, photo: Camera, host: Mic2, food: Utensils, decor: Sparkles, other: UsersRound };
 
-export function ProgramPage({ data, plan, open, share }: {
-  data: Program; plan?: Plan; open: OpenEditor; share: () => void;
+export function ProgramPage({ data, plan, open, share, live = true }: {
+  data: Program; plan?: Plan; open: OpenEditor; share?: () => void; live?: boolean;
 }) {
   const conflicts = data.blocks.filter(block => block.conflict).length;
   return <>
@@ -100,15 +100,15 @@ export function ProgramPage({ data, plan, open, share }: {
           })}
         </section>
 
-        <section className="share-card">
+        {share && <section className="share-card">
           <div className="share-card-icon"><UsersRound size={19} /></div>
           <h2>Программа для команды</h2>
           <p>Координатор, ведущий и звукорежиссёр увидят актуальный тайминг по одной ссылке.</p>
           <button className="btn secondary" onClick={share}><Share2 size={16} /> Настроить доступ</button>
-        </section>
+        </section>}
       </aside>}
     </div>
-    {!plan && <p className="team-foot"><Radio size={15} /> Программа обновляется автоматически</p>}
+    {!plan && live && <p className="team-foot"><Radio size={15} /> Программа обновляется автоматически</p>}
   </>;
 }
 

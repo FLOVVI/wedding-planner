@@ -7,8 +7,8 @@ import { isTable, objectLabels, statusLabels, type FloorObject, type ObjectKind,
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
-export function SeatingPage({ plan, token, open, change, upload, clearImage, report }: {
-  plan: Plan; token: string; open: OpenEditor; change: ChangeRecord;
+export function SeatingPage({ plan, token, eventId, open, change, upload, clearImage, report }: {
+  plan: Plan; token: string; eventId?: string; open: OpenEditor; change: ChangeRecord;
   upload: (image: File) => Promise<void>; clearImage: () => Promise<void>; report: (message: string) => void;
 }) {
   const [background, setBackground] = useState('');
@@ -30,7 +30,7 @@ export function SeatingPage({ plan, token, open, change, upload, clearImage, rep
     if (floorVersion === undefined) return;
     const controller = new AbortController();
     let objectUrl = '';
-    downloadFloor(token, controller.signal).then(blob => {
+    downloadFloor(token, controller.signal, eventId).then(blob => {
       if (controller.signal.aborted) return;
       objectUrl = URL.createObjectURL(blob);
       setBackground(objectUrl);
@@ -41,7 +41,7 @@ export function SeatingPage({ plan, token, open, change, upload, clearImage, rep
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [token, floorVersion, report]);
+  }, [token, eventId, floorVersion, report]);
 
   const tables = plan.objects.filter(isTable);
   const attending = plan.guests.filter(item => item.status !== 'declined');
