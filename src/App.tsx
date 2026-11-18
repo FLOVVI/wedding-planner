@@ -58,9 +58,12 @@ export function App() {
   async function openEvent(token: string, id: string, invite?: string) {
     const next = await api<Session>(`/events/${id}/open`, token, json('POST', { invite: invite ?? null }));
     const address = new URL(location.href);
-    if (address.searchParams.get('event') !== id) address.hash = '';
+    if (address.searchParams.has('events') || (address.searchParams.has('event') && address.searchParams.get('event') !== id)) {
+      address.hash = '';
+    }
     address.searchParams.set('event', id);
     address.searchParams.delete('join');
+    address.searchParams.delete('events');
     history.replaceState(null, '', address);
     setPage(initialPage());
     activateSession({ ...next, eventId: id });
@@ -69,6 +72,7 @@ export function App() {
   function leaveEvent() {
     const address = new URL(location.href);
     address.searchParams.delete('event');
+    address.searchParams.set('events', '1');
     address.hash = '';
     history.replaceState(null, '', address);
     activeSession.current = undefined;
@@ -97,13 +101,20 @@ export function App() {
             if (!app?.initData) throw new Error('Откройте приложение из Telegram, чтобы войти в «Мои мероприятия».');
             token = (await api<{ token: string }>('/events/login', undefined, json('POST', { initData: app.initData }))).token;
           }
-          setCatalogToken(token);
           const params = new URLSearchParams(location.search);
           const join = /^([A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{32})$/.exec(params.get('join') ?? '');
           const selected = params.get('event');
-          if (join && settings.offline) throw new Error('Для приглашений редакторов нужен подключённый сервер.');
-          if (join) await openEvent(token, join[1], join[2]);
-          else if (selected && /^[A-Za-z0-9_-]{22,36}$/.test(selected)) await openEvent(token, selected);
+          try {
+            if (join && settings.offline) throw new Error('Для приглашений редакторов нужен подключённый сервер.');
+            if (join) await openEvent(token, join[1], join[2]);
+            else if (selected && /^[A-Za-z0-9_-]{22,36}$/.test(selected)) await openEvent(token, selected);
+            else if (settings.offline && !params.has('events')) {
+              const { id } = await api<{ id: string }>('/events/default', token, { method: 'POST' });
+              await openEvent(token, id);
+            }
+          } finally {
+            setCatalogToken(token);
+          }
           return;
         }
         if (settings.demo) {

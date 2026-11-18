@@ -36,13 +36,15 @@ class EventBot:
     def catalog(self, user_id):
         events = self.events.list(user_id)
         keyboard = InlineKeyboardMarkup()
-        if button := self.snapshot_button('Открыть «Вместе»', 'catalog', {'bot': self.username, 'events': events[:25]}):
-            keyboard.add(button)
+        keyboard.add(self.planner_button())
         for event in events[:25]:
             keyboard.add(InlineKeyboardButton(event['name'][:56], callback_data='open:' + event['id']))
         keyboard.add(InlineKeyboardButton('Создать мероприятие', callback_data='new'))
         text = 'Мои мероприятия. Выберите план.' if events else 'Мои мероприятия. Создайте первый план свадьбы.'
         return self.reply(user_id, text, keyboard)
+
+    def planner_button(self):
+        return InlineKeyboardButton('Открыть планировщик', web_app=WebAppInfo(self.url))
 
     def form_url(self, kind, event_id=None):
         address = urlsplit(self.url)
@@ -94,7 +96,9 @@ class EventBot:
         if not program['blocks']:
             lines.append('Программа пока пуста.')
         keyboard = InlineKeyboardMarkup()
-        if button := self.snapshot_button('Открыть программу', 'program', {'revision': revision, **program}):
+        if role != 'viewer':
+            keyboard.add(self.planner_button())
+        if button := self.snapshot_button('Посмотреть программу', 'program', {'revision': revision, **program}):
             keyboard.add(button)
         if role != 'viewer':
             self.events.select(user_id, event_id)

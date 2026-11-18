@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowRight, CalendarDays, HeartHandshake, Plus } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarDays, HeartHandshake, Plus } from 'lucide-react';
 import { loadTelegram, telegram } from './api';
 import { ProgramPage } from './ProgramPage';
 import { blockLabels, dateLabel, type EventSummary, type Program } from './types';
@@ -97,8 +97,15 @@ export function TelegramProgram({ encoded }: { encoded: string }) {
   useEffect(() => {
     void readProgram(encoded).then(setData).catch(() => setFailed(true));
   }, [encoded]);
-  if (!data) return <main className="entry"><p>{failed ? 'Откройте программу из бота заново.' : 'Открываем программу…'}</p></main>;
-  return <main className="team-shell"><div className="content"><ProgramPage data={data} open={() => undefined} live={false} /></div></main>;
+  return <main className="team-shell">
+    <div className="topbar"><PlannerLink /><span className="read-only">Программа · просмотр</span></div>
+    {data ? <div className="content"><ProgramPage data={data} open={() => undefined} live={false} /></div> :
+      <div className="content"><p role="status">{failed ? 'Откройте программу из бота заново.' : 'Открываем программу…'}</p></div>}
+  </main>;
+}
+
+function PlannerLink() {
+  return <a className="btn secondary" href={location.pathname}><ArrowLeft size={16} /> Открыть планировщик</a>;
 }
 
 export function TelegramCatalog({ encoded }: { encoded: string }) {
@@ -111,10 +118,10 @@ export function TelegramCatalog({ encoded }: { encoded: string }) {
       setData({ ...snapshot, events: snapshot.events.filter(event => typeof event?.name === 'string' && /^[A-Za-z0-9_-]{22}$/.test(event.id)) });
     }).catch(() => setFailed(true));
   }, [encoded]);
-  if (!data) return <main className="entry"><p>{failed ? 'Откройте мероприятия из бота заново.' : 'Открываем мероприятия…'}</p></main>;
+  if (!data) return <main className="entry"><p>{failed ? 'Откройте мероприятия из бота заново.' : 'Открываем мероприятия…'}</p><PlannerLink /></main>;
   const bot = 'https://t.me/' + data.bot;
   return <main className="events-page">
-    <header className="events-brand"><span className="brand-mark"><HeartHandshake size={22} /></span><strong>Вместе</strong></header>
+    <header className="events-brand"><span className="brand-mark"><HeartHandshake size={22} /></span><strong>Вместе</strong><PlannerLink /></header>
     <div className="page-heading"><h1>Мои мероприятия</h1>
       <a className="btn primary" href={bot + '?start=new'}><Plus size={16} /> Создать мероприятие</a>
     </div>

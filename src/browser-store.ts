@@ -7,7 +7,7 @@ import {
 
 type SavedPlan = Omit<Plan, 'budget' | 'program'>;
 type State = { plan: SavedPlan; image?: Blob };
-type Catalog = { events: Record<string, State> };
+type Catalog = { events: Record<string, State>; recent?: string };
 type RecordItem = SavedPlan[Collection][number];
 const collections: ReadonlySet<string> = new Set<Collection>([
   'artists', 'blocks', 'guests', 'objects', 'expenses', 'payments', 'tasks',
@@ -287,10 +287,21 @@ export async function browserApi<T>(path: string, init?: RequestInit, eventId?: 
       return { id } as T;
     });
   }
+  if (url.pathname === '/events/default' && method === 'POST') {
+    return withStore('readwrite', catalog => {
+      const { events, recent } = catalog;
+      const existing = recent && Object.hasOwn(events, recent) ? recent : Object.keys(events).at(-1);
+      if (existing) return { id: existing } as T;
+      const id = crypto.randomUUID();
+      events[id] = emptyState();
+      return { id } as T;
+    });
+  }
   const opening = /^\/events\/([a-zA-Z0-9-]+)\/open$/.exec(url.pathname);
   if (opening && method === 'POST') {
-    return withStore('readonly', catalog => {
+    return withStore('readwrite', catalog => {
       eventState(catalog, opening[1]);
+      catalog.recent = opening[1];
       return { token: '', role: 'owner' } as T;
     });
   }

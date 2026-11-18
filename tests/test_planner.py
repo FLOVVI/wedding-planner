@@ -240,6 +240,9 @@ class PlannerTests(unittest.TestCase):
         url = 'https://example.github.io/wedding/'
         bot = EventBot(Store(path, demo=False, sample=False), url)
         bot.username = 'example_bot'
+        main_button = bot.catalog('111')['reply_markup'].to_dict()['inline_keyboard'][0][0]
+        self.assertEqual(main_button['text'], 'Открыть планировщик')
+        self.assertEqual(main_button['web_app']['url'], url)
 
         def message(user_id, message_id, *, text=None, form=None):
             data = {'message_id': message_id, 'date': int(time.time()),
@@ -252,7 +255,9 @@ class PlannerTests(unittest.TestCase):
             return types.Message.de_json(data)
 
         creation = message(111, 1, form={'type': 'create_event', 'settings': {'name': 'Свадьба пары'}})
-        self.assertIn('Свадьба пары', bot.message(creation)['text'])
+        created = bot.message(creation)
+        self.assertIn('Свадьба пары', created['text'])
+        self.assertEqual(created['reply_markup'].to_dict()['inline_keyboard'][0][0]['web_app']['url'], url)
         bot.message(creation)
         event, = bot.events.list('111')
         event_id = event['id']
