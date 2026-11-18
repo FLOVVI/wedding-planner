@@ -37,7 +37,7 @@ def apply_record(plan, collection, item):
         if item['capacity'] < occupied:
             raise HTTPException(409, 'Сначала пересадите гостей, для которых не хватит мест')
     elif collection == 'blocks' and item['artistId'] and not lookup(plan['artists'], item['artistId']):
-        raise HTTPException(422, 'Выберите существующего артиста')
+        raise HTTPException(422, 'Выберите существующего подрядчика')
     elif collection == 'payments' and not valid_source(plan, item['source']):
         raise HTTPException(422, 'Выберите существующую статью сметы')
 

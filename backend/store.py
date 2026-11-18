@@ -25,16 +25,26 @@ def sample_plan():
              sound='Два вокальных микрофона, DI для гитары и монитор у сцены.'),
         dict(id='dj', name='DJ Север', role='DJ-сет', contact='', fee=45000,
              sound='Пульт и свободный стереоканал.'),
+        dict(id='photo', name='Алина Морозова', category='photo', role='Фотограф', contact='', fee=42000,
+             sound='Встретиться у главного входа за 15 минут до съёмки.'),
     ]
     plan['blocks'] = [
         dict(id='check', title='Саундчек дуэта', kind='soundcheck', start='15:30', duration=30,
              responsible='Звукорежиссёр', artistId='duet', tracks=[], notes='Проверить уровни вокала и гитары.'),
-        dict(id='welcome', title='Сбор гостей', kind='other', start='16:30', duration=45,
+        dict(id='welcome', title='Сбор гостей', kind='welcome', start='16:30', duration=30,
              responsible='Координатор', artistId=None, tracks=[], notes='Тихая фоновая музыка на террасе.'),
+        dict(id='ceremony', title='Выездная церемония', kind='ceremony', start='17:00', duration=25,
+             responsible='Ведущий', artistId=None, tracks=[], notes='Гости занимают места за пять минут до начала.'),
+        dict(id='portrait', title='Фотографии с семьёй и друзьями', kind='photo', start='17:30', duration=25,
+             responsible='', artistId='photo', tracks=[], notes='Собраться у арки после церемонии.'),
+        dict(id='dinner', title='Начало банкета', kind='dinner', start='18:00', duration=15,
+             responsible='Координатор', artistId=None, tracks=[], notes='Показать гостям карту рассадки.'),
         dict(id='dance', title='Первый танец', kind='dance', start='18:15', duration=5,
              responsible='Ведущий', artistId=None, tracks=[], notes='Запустить трек после сигнала ведущего.'),
         dict(id='live', title='Акустический сет', kind='live', start='18:30', duration=45,
              responsible='', artistId='duet', tracks=[], notes='Дуэт выходит после первого тоста.'),
+        dict(id='cake', title='Вынос торта', kind='cake', start='19:45', duration=15,
+             responsible='Ведущий', artistId=None, tracks=[], notes='Фотограф готов у танцпола.'),
         dict(id='party', title='Танцы и DJ-сет', kind='dj', start='20:00', duration=120,
              responsible='', artistId='dj', tracks=[], notes='Открыть танцпол после торта.'),
     ]
@@ -69,7 +79,7 @@ def sample_plan():
 
 
 class Store:
-    def __init__(self, path: Path, demo: bool, sample: bool):
+    def __init__(self, path: Path, demo: bool, sample: bool, owner_id: str | None = None):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
@@ -108,7 +118,7 @@ class Store:
                                (json.dumps(sample_plan() if sample else empty_plan(), ensure_ascii=False),))
             if demo:
                 connection.execute("INSERT OR IGNORE INTO members VALUES ('demo-owner', 'owner')")
-            elif owner := os.environ.get('TELEGRAM_OWNER_ID'):
+            elif owner := owner_id or os.environ.get('TELEGRAM_OWNER_ID'):
                 connection.execute("DELETE FROM members WHERE role = 'owner' AND user_id <> ?", (owner,))
                 connection.execute("INSERT INTO members VALUES (?, 'owner') ON CONFLICT(user_id) DO UPDATE SET role = 'owner'", (owner,))
 

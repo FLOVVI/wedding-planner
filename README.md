@@ -1,6 +1,6 @@
 # Вместе
 
-Локальный свадебный планировщик для Telegram Mini App. В одном плане хранятся музыкальная программа, артисты, рассадка, список гостей, смета и задачи.
+Свадебный планировщик для Telegram Mini App. Обзор собирает готовность гостей и рассадки, смету и ближайшие сроки. В общем плане можно составить программу дня, вести подрядчиков и собрать музыкальные моменты.
 
 ## Локальный запуск
 
@@ -34,20 +34,38 @@ npm.cmd run build
 
 ## Подключение Telegram
 
+### Запуск бота на ПК
+
+Бот использует `pyTelegramBotAPI` и polling. Создайте отдельного бота через `/newbot` в BotFather. Сохраните его токен локально в строке `WEDDING_BOT_TOKEN=…` и запустите:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m backend.bot --keys "C:\путь\к\keys.txt"
+```
+
+`/start` открывает сайт GitHub Pages прямо из Telegram. Пробрасывать порт на компьютере для бота не требуется. Команда `/id` покажет ваш Telegram ID для настройки `WEDDING_OWNER_ID`. По умолчанию используется `data/wedding.sqlite3`.
+
+### Запуск Mini App с общим планом
+
 Когда появится HTTPS-адрес, настройте Main Mini App в BotFather и передайте серверу `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_OWNER_ID` и `TELEGRAM_MINI_APP_URL` через переменные окружения. Соберите интерфейс и запустите `python -m backend` одним процессом за HTTPS-прокси. Этот режим использует отдельную базу `data/wedding.sqlite3` и получает обновления бота через long polling.
+
+Запускайте только один polling-процесс для одного токена. Команда `python -m backend` на сервере запускает и API, и бота.
 
 Партнёр открывает одноразовое приглашение из приложения. Для напоминаний каждый участник открывает личный чат с ботом, отправляет `/start` и включает уведомления в приложении либо командой `/reminders`. Команда `/stop` отключает уведомления.
 
-## Интерфейс на GitHub Pages
+## Публичный сайт на GitHub Pages
 
-Сервер можно разместить по отдельному HTTPS-адресу. Укажите URL GitHub Pages со слешем в конце в `TELEGRAM_MINI_APP_URL` и настройках Main Mini App в BotFather. Сервер разрешит браузерные запросы с origin этого сайта.
+Команда `npm.cmd run build -- --mode pages` собирает открытый сайт проекта. Разместите `dist` в ветке `gh-pages`. Переменная `VITE_BOT_USERNAME` добавляет на сайт кнопку перехода к вашему боту.
 
-Соберите интерфейс с origin сервера и опубликуйте содержимое `dist` через GitHub Pages:
+На сервере соберите приложение обычной командой `npm.cmd run build`, затем запустите `python -m backend` с конфигурацией Telegram. Укажите HTTPS-адрес сервера в `TELEGRAM_MINI_APP_URL` и в настройках Main Mini App в BotFather.
+
+Если веб-интерфейс самого планировщика нужно разместить на Pages, соберите его с публичным origin API и укажите адрес `github.io` в BotFather и `TELEGRAM_MINI_APP_URL`:
 
 ```powershell
 $env:VITE_API_ORIGIN = 'https://api.example.com'
-npm.cmd run build
+npm.cmd run build -- --mode pages
 Remove-Item Env:VITE_API_ORIGIN
 ```
 
 Для публикации из ветки положите рядом с `index.html` пустой файл `.nojekyll`. Для SQLite серверу требуется постоянное хранилище. Переменные Telegram задаются на сервере.
+

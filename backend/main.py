@@ -77,7 +77,7 @@ def create_app(*, demo=False, sample=True, database=None):
 
     @asynccontextmanager
     async def lifespan(_app):
-        jobs = [asyncio.create_task(bot.poll()), asyncio.create_task(bot.reminder_loop())] if bot else []
+        jobs = [asyncio.create_task(bot.run())] if bot else []
         try:
             yield
         finally:

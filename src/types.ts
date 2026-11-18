@@ -1,8 +1,9 @@
 export type Role = 'owner' | 'editor' | 'team';
-export type Page = 'program' | 'seating' | 'guests' | 'budget' | 'tasks';
+export type Page = 'overview' | 'program' | 'seating' | 'guests' | 'budget' | 'tasks';
 export type Status = 'confirmed' | 'waiting' | 'declined';
 export type ObjectKind = 'round' | 'rectangle' | 'stage' | 'dance' | 'entrance';
-export type BlockKind = 'soundcheck' | 'ceremony' | 'dance' | 'live' | 'dj' | 'other';
+export type BlockKind = 'welcome' | 'ceremony' | 'photo' | 'dinner' | 'toast' | 'cake' | 'soundcheck' | 'dance' | 'live' | 'dj' | 'other';
+export type ContractorCategory = 'music' | 'venue' | 'photo' | 'host' | 'food' | 'decor' | 'other';
 
 export interface Settings {
   name: string;
@@ -35,6 +36,7 @@ export interface FloorObject {
 export interface Artist {
   id: string;
   name: string;
+  category?: ContractorCategory;
   role: string;
   contact: string;
   fee: number;
@@ -136,8 +138,13 @@ export const objectLabels: Record<ObjectKind, string> = {
 };
 
 export const blockLabels: Record<BlockKind, string> = {
-  soundcheck: 'Саундчек', ceremony: 'Церемония', dance: 'Первый танец',
-  live: 'Выступление', dj: 'DJ-сет', other: 'Событие',
+  welcome: 'Сбор гостей', ceremony: 'Церемония', photo: 'Фотосъёмка', dinner: 'Банкет', toast: 'Тосты',
+  cake: 'Торт', dance: 'Первый танец', soundcheck: 'Саундчек', live: 'Выступление', dj: 'DJ-сет', other: 'Другое',
+};
+
+export const contractorLabels: Record<ContractorCategory, string> = {
+  venue: 'Площадка', host: 'Ведущий или координатор', photo: 'Фото и видео',
+  food: 'Кейтеринг и торт', decor: 'Декор и флористика', music: 'Музыка и звук', other: 'Другое',
 };
 
 export const statusLabels: Record<Status, string> = {

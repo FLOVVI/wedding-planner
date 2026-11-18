@@ -14,9 +14,10 @@ from urllib.parse import urlencode
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from telebot import types
 
 from backend.main import create_app
-from backend.notifications import claim_delivery, collect
+from backend.notifications import TelegramBot, claim_delivery, collect
 from backend.store import Store
 
 
@@ -105,6 +106,23 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(self.plan()['budget']['expected'], 1)
         self.update('guests', unseated['id'], {**unseated, 'tableId': table}).raise_for_status()
 
+    def test_wedding_timeline_shares_non_music_events_and_protects_contract_details(self):
+        photographer = self.add('artists', {'name': 'Фотограф', 'category': 'photo', 'fee': 30000,
+                                            'contact': 'Личный номер', 'sound': 'Встретиться у входа'})
+        for title, kind, start in [
+            ('Церемония', 'ceremony', '15:00'), ('Фотосъёмка', 'photo', '15:30'), ('Торт', 'cake', '20:00'),
+        ]:
+            self.add('blocks', {'title': title, 'kind': kind, 'start': start, 'duration': 25,
+                                'artistId': photographer if kind == 'photo' else None})
+        full = self.plan()
+        self.assertEqual(full['artists'][0]['category'], 'photo')
+        self.assertEqual(full['budget']['total'], 30000)
+        team = self.login('team', self.make_link('team'))
+        published = self.api.get('/api/program', headers=team).json()['blocks']
+        self.assertEqual([block['kind'] for block in published], ['ceremony', 'photo', 'cake'])
+        self.assertEqual(published[1]['artistSound'], 'Встретиться у входа')
+        self.assertNotIn('Личный номер', str(published))
+
     def test_image_replacement_preserves_coordinates_and_assignments(self):
         table = self.add('objects', {'name': 'Стол', 'kind': 'rectangle', 'capacity': 4, 'x': .3, 'rotation': 22})
         self.add('guests', {'name': 'Анна', 'family': 'Волковы', 'tableId': table})
@@ -188,6 +206,26 @@ class PlannerTests(unittest.TestCase):
             denied = client.options('/api/floor', headers={**headers, 'Origin': 'https://other.example'})
             self.assertEqual(denied.status_code, 400)
             self.assertNotIn('Access-Control-Allow-Origin', denied.headers)
+
+    def test_polling_bot_opens_pages_and_subscribes_only_members(self):
+        store = Store(self.database.with_name('bot.db'), demo=False, sample=False, owner_id='13579')
+        url = 'https://example.github.io/wedding/'
+        bot = TelegramBot(store, '12345:' + 'x' * 32, url)
+
+        def message(user, text):
+            return types.Message.de_json({
+                'message_id': 1, 'date': int(time.time()), 'text': text,
+                'chat': {'id': user, 'type': 'private'},
+                'from': {'id': user, 'is_bot': False, 'first_name': 'Example'},
+            })
+
+        with store.connect(write=True) as connection:
+            reply = bot.handle_message(connection, message(13579, '/start'))
+            self.assertEqual(reply['reply_markup'].to_dict()['inline_keyboard'][0][0]['web_app']['url'], url)
+            bot.handle_message(connection, message(24680, '/reminders'))
+            bot.handle_message(connection, message(13579, '/reminders'))
+            subscribers = connection.execute('SELECT user_id FROM subscriptions WHERE enabled = 1').fetchall()
+            self.assertEqual([row['user_id'] for row in subscribers], ['13579'])
 
 
 if __name__ == '__main__':

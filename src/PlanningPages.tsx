@@ -73,9 +73,9 @@ export function BudgetPage({ plan, open, change }: { plan: Plan; open: OpenEdito
         <div className="simple-row"><span>Все ожидаемые <small>· {totals.expected} чел.</small></span><strong>{money(totals.expectedBanquet)}</strong></div>
       </section>
       <section className="panel">
-        <div className="panel-heading"><div><h2>Другие расходы</h2><p>Гонорары и статьи сметы</p></div></div>
-        {!plan.expenses.length && !plan.artists.length && <Empty>Добавьте расход или артиста.</Empty>}
-        {plan.artists.map(artist => <div className="simple-row" key={artist.id}><span>{artist.name} <small>· гонорар</small></span><strong>{money(artist.fee)}</strong></div>)}
+        <div className="panel-heading"><div><h2>Другие расходы</h2><p>Подрядчики и статьи сметы</p></div></div>
+        {!plan.expenses.length && !plan.artists.length && <Empty>Добавьте расход или подрядчика.</Empty>}
+        {plan.artists.map(artist => <div className="simple-row" key={artist.id}><span>{artist.name} <small>· подрядчик</small></span><strong>{money(artist.fee)}</strong></div>)}
         {plan.expenses.map(expense => <div className="simple-row" key={expense.id}><span>{expense.name}</span>
           <div><strong>{money(expense.amount)}</strong><EditButton label={`Изменить ${expense.name}`} onClick={() => open(expenseEditor(expense))} /></div>
         </div>)}

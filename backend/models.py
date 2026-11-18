@@ -46,6 +46,7 @@ class FloorObject(BaseModel):
 
 class Artist(BaseModel):
     name: Name
+    category: Literal['music', 'venue', 'photo', 'host', 'food', 'decor', 'other'] = 'music'
     role: Text = ''
     contact: Text = ''
     fee: Amount = 0
@@ -54,7 +55,7 @@ class Artist(BaseModel):
 
 class ProgramBlock(BaseModel):
     title: Name
-    kind: Literal['soundcheck', 'ceremony', 'dance', 'live', 'dj', 'other'] = 'other'
+    kind: Literal['welcome', 'ceremony', 'photo', 'dinner', 'toast', 'cake', 'soundcheck', 'dance', 'live', 'dj', 'other'] = 'other'
     start: time
     nextDay: bool = False
     duration: int = Field(ge=1, le=720)

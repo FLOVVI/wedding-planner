@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Armchair, CalendarDays, HeartHandshake, ListTodo, Music2, Settings2, Share2, UsersRound, Wallet, X } from 'lucide-react';
+import { Armchair, CalendarDays, CalendarClock, HeartHandshake, LayoutGrid, ListTodo, Settings2, Share2, UsersRound, Wallet, X } from 'lucide-react';
 import { AccessDialog } from './AccessDialog';
 import { api, ApiError, json, telegram } from './api';
 import { FormDialog, type Editor } from './components';
 import { settingsEditor } from './forms';
+import { OverviewPage } from './OverviewPage';
 import { BudgetPage, GuestsPage, TasksPage } from './PlanningPages';
 import { ProgramPage } from './ProgramPage';
 import { SeatingPage } from './SeatingPage';
 import type { Collection, Config, FormData, Page, Plan, Program, Session } from './types';
 
 const navigation = [
-  { id: 'program', title: 'Программа', icon: Music2 },
+  { id: 'overview', title: 'Обзор', icon: LayoutGrid },
+  { id: 'program', title: 'Программа', icon: CalendarClock },
   { id: 'seating', title: 'Рассадка', icon: Armchair },
   { id: 'guests', title: 'Гости', icon: UsersRound },
   { id: 'budget', title: 'Смета', icon: Wallet },
@@ -18,7 +20,7 @@ const navigation = [
 ] as const;
 
 const SESSION_KEY = 'vmeste-session';
-const initialPage = () => navigation.find(item => `#${item.id}` === location.hash)?.id ?? 'program';
+const initialPage = () => navigation.find(item => `#${item.id}` === location.hash)?.id ?? 'overview';
 
 let telegramScript: Promise<void> | undefined;
 function loadTelegram() {
@@ -152,7 +154,7 @@ export function App() {
   async function reopenDemo() {
     try {
       history.replaceState(null, '', '/');
-      setPage('program');
+      setPage('overview');
       activateSession(await api<Session>('/session/demo', undefined, json('POST', { user: 'owner' })));
     } catch (reason) { setFailure(reason instanceof Error ? reason.message : 'Не удалось открыть локальный план'); }
   }
@@ -235,6 +237,7 @@ export function App() {
         {failure && <div className="warning" role="status">{failure}</div>}
         {team && teamProgram && <ProgramPage data={teamProgram} open={open} share={() => undefined} />}
         {!team && plan && <>
+          {page === 'overview' && <OverviewPage plan={plan} go={go} settings={() => open(settingsEditor(plan.settings))} />}
           {page === 'program' && <ProgramPage data={{ revision: plan.revision, settings: plan.settings, blocks: plan.program }} plan={plan} open={open} share={() => setSharing(true)} />}
           {page === 'seating' && <SeatingPage plan={plan} token={session.token} open={open} change={change}
             upload={changeFloor} clearImage={() => changeFloor()} report={report} />}

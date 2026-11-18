@@ -1,12 +1,16 @@
 import {
-  AlertTriangle, AudioLines, CalendarDays, ChevronDown, Disc3, ExternalLink, Heart, MapPin, Mic2,
-  Music2, Radio, Settings2, Share2, Sparkles, UsersRound,
+  AlertTriangle, AudioLines, Cake, CalendarDays, Camera, ChevronDown, Disc3, ExternalLink, GlassWater,
+  Heart, MapPin, Mic2, Music2, Radio, Settings2, Share2, Sparkles, UsersRound, Utensils,
 } from 'lucide-react';
 import { AddButton, EditButton, Empty, type OpenEditor } from './components';
 import { artistEditor, eventEditor, paymentEditor, settingsEditor } from './forms';
-import { blockLabels, dateLabel, money, showTime, type Plan, type Program } from './types';
+import { blockLabels, contractorLabels, dateLabel, money, showTime, type Plan, type Program } from './types';
 
-const eventIcons = { soundcheck: AudioLines, ceremony: Heart, dance: Music2, live: Mic2, dj: Disc3, other: Sparkles };
+const eventIcons = {
+  welcome: UsersRound, ceremony: Heart, photo: Camera, dinner: Utensils, toast: GlassWater, cake: Cake,
+  soundcheck: AudioLines, dance: Music2, live: Mic2, dj: Disc3, other: Sparkles,
+};
+const contractorIcons = { music: Music2, venue: MapPin, photo: Camera, host: Mic2, food: Utensils, decor: Sparkles, other: UsersRound };
 
 export function ProgramPage({ data, plan, open, share }: {
   data: Program; plan?: Plan; open: OpenEditor; share: () => void;
@@ -14,10 +18,9 @@ export function ProgramPage({ data, plan, open, share }: {
   const conflicts = data.blocks.filter(block => block.conflict).length;
   return <>
     <section className="program-hero">
-      <div className="hero-motif" aria-hidden="true"><i /><i /><i /><i /><Music2 size={82} strokeWidth={.85} /></div>
+      <div className="hero-motif" aria-hidden="true"><i /><i /><i /><i /><CalendarDays size={74} strokeWidth={.85} /></div>
       <div className="hero-content">
-        <div className="hero-kicker"><Music2 size={15} /> Музыка и тайминг</div>
-        <h1>Программа свадьбы</h1>
+        <h1>День свадьбы</h1>
         <div className="hero-meta">
           <span><CalendarDays size={16} />{data.settings.date ? dateLabel(data.settings.date, true) : 'Дата уточняется'}</span>
           <span><MapPin size={16} />{data.settings.venue || 'Площадка уточняется'}</span>
@@ -50,7 +53,7 @@ export function ProgramPage({ data, plan, open, share }: {
                 </div>
                 {block.notes && <p>{block.notes}</p>}
                 {(block.tracks.length > 0 || block.artistSound) && <details className="block-details">
-                  <summary>{block.tracks.length ? 'Треки и звук' : 'Требования к звуку'} <ChevronDown size={13} /></summary>
+                  <summary>{block.tracks.length ? 'Треки и технические детали' : 'Технические детали'} <ChevronDown size={13} /></summary>
                   {block.artistSound && <p>{block.artistSound}</p>}
                   {block.tracks.map((track, index) => <a key={`${track}-${index}`} href={track} target="_blank" rel="noreferrer">
                     <Music2 size={14} /> Трек {index + 1} <ExternalLink size={12} />
@@ -66,18 +69,20 @@ export function ProgramPage({ data, plan, open, share }: {
       {plan && <aside className="program-aside">
         <section className="panel artist-panel">
           <div className="panel-heading">
-            <div><h2>Артисты</h2><p>Состав и технические детали</p></div>
-            <button className="icon-btn add-icon" aria-label="Добавить артиста" title="Добавить артиста" onClick={() => open(artistEditor())}>
+            <div><h2>Команда свадьбы</h2><p>Подрядчики, контакты и платежи</p></div>
+            <button className="icon-btn add-icon" aria-label="Добавить подрядчика" title="Добавить подрядчика" onClick={() => open(artistEditor())}>
               <span aria-hidden="true">+</span>
             </button>
           </div>
-          {!plan.artists.length && <Empty>Приглашённые артисты появятся здесь.</Empty>}
+          {!plan.artists.length && <Empty>Добавьте площадку, фотографа, ведущего или музыкантов.</Empty>}
           {plan.artists.map((artist, index) => {
             const payments = plan.payments.filter(payment => payment.source === `artist:${artist.id}`);
+            const category = artist.category ?? 'music';
+            const Icon = contractorIcons[category];
             return <article className="artist-card" key={artist.id}>
               <div className="artist-row">
-                <div className={`artist-icon ${index % 2 ? 'cool' : ''}`}>{index % 2 ? <Disc3 size={21} /> : <Mic2 size={21} />}</div>
-                <div className="artist-name"><h3>{artist.name}</h3>{artist.role && <p>{artist.role}</p>}</div>
+                <div className={`artist-icon ${index % 2 ? 'cool' : ''}`}><Icon size={21} /></div>
+                <div className="artist-name"><h3>{artist.name}</h3><p>{artist.role || contractorLabels[category]}</p></div>
                 <EditButton label={`Изменить ${artist.name}`} onClick={() => open(artistEditor(artist))} />
               </div>
               <details className="artist-details">

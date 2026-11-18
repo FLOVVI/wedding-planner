@@ -1,7 +1,7 @@
 import type { Editor, FieldSpec } from './components';
 import {
   type Artist, type Block, type Expense, type FloorObject, type Guest, type ObjectKind, type Payment,
-  type Plan, type Settings, type Task, blockLabels, isTable, objectLabels, statusLabels,
+  type Plan, type Settings, type Task, blockLabels, contractorLabels, isTable, objectLabels, statusLabels,
 } from './types';
 
 const name: FieldSpec = { key: 'name', label: 'Название', required: true };
@@ -21,8 +21,8 @@ export function eventEditor(plan: Plan, current?: Block): Editor {
       { key: 'start', label: 'Начало', type: 'time', half: true, required: true },
       { key: 'duration', label: 'Длительность, мин', type: 'number', half: true, min: 1, max: 720, required: true },
       { key: 'nextDay', label: 'После полуночи, на следующий день', type: 'check' },
-      { key: 'artistId', label: 'Артист', type: 'select', emptyNull: true,
-        options: [['', 'Без артиста'], ...plan.artists.map<[string, string]>(artist => [artist.id, artist.name])] },
+      { key: 'artistId', label: 'Подрядчик', type: 'select', emptyNull: true,
+        options: [['', 'Без подрядчика'], ...plan.artists.map<[string, string]>(artist => [artist.id, artist.name])] },
       { key: 'responsible', label: 'Ответственный' },
       { key: 'tracks', label: 'Ссылки на треки', type: 'links', hint: 'Одна ссылка на строку.' },
       { key: 'notes', label: 'Заметки для команды', type: 'textarea' },
@@ -32,14 +32,17 @@ export function eventEditor(plan: Plan, current?: Block): Editor {
 
 export function artistEditor(current?: Artist): Editor {
   return {
-    title: current ? 'Карточка артиста' : 'Новый артист', collection: 'artists', id: current?.id,
-    initial: { ...(current ?? { name: '', role: '', contact: '', fee: 0, sound: '' }) },
+    title: current ? 'Карточка подрядчика' : 'Новый подрядчик', collection: 'artists', id: current?.id,
+    initial: current ? { ...current, category: current.category ?? 'music' } :
+      { name: '', category: 'other', role: '', contact: '', fee: 0, sound: '' },
     fields: [
       { ...name, label: 'Имя или название' },
-      { key: 'role', label: 'Роль или формат' },
+      { key: 'category', label: 'Категория', type: 'select', options: Object.entries(contractorLabels) },
+      { key: 'role', label: 'Услуга или роль' },
       { key: 'contact', label: 'Контакт' },
-      { ...amount, key: 'fee', label: 'Гонорар, ₽' },
-      { key: 'sound', label: 'Требования к звуку', type: 'textarea', hint: 'Видны команде в связанных событиях.' },
+      { ...amount, key: 'fee', label: 'Стоимость, ₽' },
+      { key: 'sound', label: 'Технические детали', type: 'textarea',
+        hint: 'Например, требования к звуку или порядок доступа на площадку. Видны команде в связанных событиях.' },
     ],
   };
 }

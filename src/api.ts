@@ -1,6 +1,7 @@
 import type { FormData } from './types';
 
 const apiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.replace(/\/$/, '') ?? '';
+export const publicSite = import.meta.env.MODE === 'pages' && !apiOrigin;
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
